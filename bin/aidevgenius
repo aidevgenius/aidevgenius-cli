@@ -1,0 +1,306 @@
+#!/bin/bash
+# aidevgenius - Multi-purpose CLI for Termux
+# Usage: aidevgenius <tool> [command] [options]
+# Example: aidevgenius flutter build apk --release
+#          aidevgenius flutter doctor
+#          aidevgenius --help
+
+# Don't use set -e here - commands handle their own errors
+
+# Installation directory (standard location)
+AIDEVGENIUS_HOME="${HOME}/.aidevgenius"
+
+# If running from different location, try to resolve
+if [[ ! -d "${AIDEVGENIUS_HOME}/lib" ]]; then
+    # Fallback: resolve from script path
+    SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+    # Follow symlinks
+    while [[ -L "$SCRIPT_SOURCE" ]]; do
+        LINK_TARGET="$(readlink "$SCRIPT_SOURCE" 2>/dev/null || ls -la "$SCRIPT_SOURCE" | awk '{print $NF}')"
+        if [[ "$LINK_TARGET" == /* ]]; then
+            SCRIPT_SOURCE="$LINK_TARGET"
+        else
+            SCRIPT_SOURCE="$(dirname "$SCRIPT_SOURCE")/$LINK_TARGET"
+        fi
+    done
+    AIDEVGENIUS_HOME="$(cd "$(dirname "$SCRIPT_SOURCE")/.." && pwd)"
+fi
+
+LIB_DIR="${AIDEVGENIUS_HOME}/lib"
+TOOLS_DIR="${AIDEVGENIUS_HOME}/tools"
+
+# Verify lib directory exists
+if [[ ! -f "${LIB_DIR}/core.sh" ]]; then
+    echo "Error: Cannot find aidevgenius library at ${LIB_DIR}"
+    echo "Please reinstall: curl -fsSL https://raw.githubusercontent.com/aidevgenius/aidevgenius-cli/dev/install.sh | bash"
+    exit 1
+fi
+
+# Source core library
+source "${LIB_DIR}/core.sh"
+
+# ============ Help Text ============
+
+show_help() {
+    echo ""
+    echo -e "${BOLD}${CYAN}aidevgenius${NC} v${VERSION}"
+    echo "Multi-purpose CLI for mobile developers"
+    echo ""
+    echo -e "${BOLD}USAGE:${NC}"
+    echo "  aidevgenius <tool> [command] [options]"
+    echo ""
+    echo -e "${BOLD}TOOLS:${NC}"
+    echo "  flutter     Flutter development & cloud builds"
+    echo "  install     Install packages & CLI tools"
+    echo ""
+    echo -e "${BOLD}GLOBAL COMMANDS:${NC}"
+    echo "  --help, -h      Show this help message"
+    echo "  --version, -v   Show version"
+    echo "  update          Update aidevgenius to latest version"
+    echo ""
+    echo -e "${BOLD}INSTALL COMMANDS:${NC}"
+    echo "  aidevgenius install flutter      Install Flutter SDK"
+    echo "  aidevgenius install qwen         Install Qwen AI Code CLI"
+    echo "  aidevgenius install neovim       Install Neovim editor"
+    echo "  aidevgenius install fish         Install Fish shell"
+    echo "  aidevgenius install oh-my-zsh    Install Zsh + Oh My Zsh + Powerlevel10k"
+    echo "  aidevgenius install shell-tools  Install Fish + Zsh + TheFuck + Fzf"
+    echo "  aidevgenius install <pkg>        Install any Termux package"
+    echo ""
+    echo -e "${BOLD}FLUTTER COMMANDS:${NC}"
+    echo "  aidevgenius flutter doctor       Check system requirements"
+    echo "  aidevgenius flutter init         Initialize cloud build"
+    echo "  aidevgenius flutter build apk    Build APK in cloud"
+    echo "  aidevgenius flutter run web      Run Flutter web server"
+    echo ""
+    echo -e "${BOLD}EXAMPLES:${NC}"
+    echo "  aidevgenius install flutter"
+    echo "  aidevgenius install qwen"
+    echo "  aidevgenius flutter build apk --release"
+    echo "  aidevgenius update"
+    echo ""
+    echo -e "${BOLD}DOCS:${NC}"
+    echo "  https://github.com/aidevgenius/aidevgenius-cli"
+    echo ""
+}
+
+show_version() {
+    echo "aidevgenius v${VERSION}"
+}
+
+# ============ Tool Router ============
+
+main() {
+    # No arguments - show help
+    if [[ $# -eq 0 ]]; then
+        show_help
+        exit 0
+    fi
+    
+    # Parse first argument
+    case "$1" in
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        --version|-v)
+            show_version
+            exit 0
+            ;;
+        update)
+            source "${LIB_DIR}/update.sh"
+            cmd_update
+            ;;
+        install)
+            shift
+            run_install_tool "$@"
+            ;;
+        flutter)
+            shift
+            run_flutter_tool "$@"
+            ;;
+        *)
+            # Check if it's a tool in the tools directory
+            if [[ -f "${TOOLS_DIR}/$1/main.sh" ]]; then
+                local tool_name="$1"
+                shift
+                source "${TOOLS_DIR}/${tool_name}/main.sh"
+                tool_main "$@"
+            else
+                print_error "Unknown tool: $1"
+                echo "Run 'aidevgenius --help' for available tools"
+                exit 1
+            fi
+            ;;
+    esac
+}
+
+# ============ Flutter Tool ============
+
+run_flutter_tool() {
+    # No subcommand - show flutter help
+    if [[ $# -eq 0 ]]; then
+        show_flutter_help
+        exit 0
+    fi
+    
+    case "$1" in
+        --help|-h)
+            show_flutter_help
+            exit 0
+            ;;
+        install)
+            source "${LIB_DIR}/flutter/install.sh"
+            cmd_install_flutter "${@:2}"
+            ;;
+        doctor)
+            source "${LIB_DIR}/flutter/doctor.sh"
+            cmd_doctor "${@:2}"
+            ;;
+        init)
+            source "${LIB_DIR}/flutter/init.sh"
+            cmd_init "${@:2}"
+            ;;
+        build)
+            shift
+            source "${LIB_DIR}/flutter/build.sh"
+            if [[ "$1" == "apk" ]]; then
+                cmd_build "apk" "${@:2}"
+            elif [[ "$1" == "appbundle" || "$1" == "aab" ]]; then
+                cmd_build "appbundle" "${@:2}"
+            elif [[ -z "$1" || "$1" == --* ]]; then
+                # No target specified, default to apk
+                cmd_build "apk" "$@"
+            else
+                print_error "Unknown build target: $1"
+                echo ""
+                echo "Usage: aidevgenius flutter build <target> [options]"
+                echo ""
+                echo "Targets:"
+                echo "  apk        Build Android APK"
+                echo "  appbundle  Build Android App Bundle (AAB)"
+                echo ""
+                echo "Options:"
+                echo "  --debug    Debug build (default)"
+                echo "  --profile  Profile build"
+                echo "  --release  Release build"
+                echo "  --split    Split APK by ABI"
+                echo "  --arm64    ARM64 only"
+                echo "  --arm      ARM only"
+                echo "  --x64      x64 only"
+                echo "  --install  Install on device after build"
+                exit 1
+            fi
+            ;;
+        run)
+            shift
+            source "${LIB_DIR}/flutter/run.sh"
+            cmd_run "${@}"
+            ;;
+        *)
+            print_error "Unknown flutter command: $1"
+            echo "Run 'aidevgenius flutter --help' for usage"
+            exit 1
+            ;;
+    esac
+}
+
+show_flutter_help() {
+    echo ""
+    echo -e "${BOLD}${CYAN}aidevgenius flutter${NC}"
+    echo "Flutter development & cloud builds for Termux"
+    echo ""
+    echo -e "${BOLD}USAGE:${NC}"
+    echo "  aidevgenius flutter <command> [options]"
+    echo ""
+    echo -e "${BOLD}COMMANDS:${NC}"
+    echo "  install            Install Flutter SDK for Termux"
+    echo "  doctor             Check system requirements"
+    echo "  init               Initialize cloud build in Flutter project"
+    echo "  build apk          Build APK using cloud (GitHub Actions)"
+    echo "  build appbundle    Build AAB using cloud (GitHub Actions)"
+    echo "  run web            Run Flutter web server (local)"
+    echo ""
+    echo -e "${BOLD}BUILD OPTIONS:${NC}"
+    echo "  --debug            Debug build (default)"
+    echo "  --profile          Profile build"
+    echo "  --release          Release build"
+    echo "  --split-per-abi    Split APK by ABI"
+    echo "  --target-platform  Target specific platform"
+    echo "  --install          Install on device after download"
+    echo ""
+    echo -e "${BOLD}EXAMPLES:${NC}"
+    echo "  aidevgenius flutter build apk              # Debug APK"
+    echo "  aidevgenius flutter build apk --release    # Release APK"
+    echo "  aidevgenius flutter build apk --split-per-abi  # Split APKs"
+    echo "  aidevgenius flutter build appbundle        # App Bundle"
+    echo "  aidevgenius flutter build apk --install    # Build & install"
+    echo ""
+}
+
+# ============ Install Tool ============
+
+run_install_tool() {
+    # No package - show help
+    if [[ $# -eq 0 ]]; then
+        show_install_help
+        exit 1
+    fi
+    
+    local package="$1"
+    shift
+    
+    case "$package" in
+        flutter)
+            source "${LIB_DIR}/flutter/install.sh"
+            cmd_install_flutter
+            ;;
+        --help|-h)
+            show_install_help
+            ;;
+        *)
+            # Generic package install
+            source "${LIB_DIR}/install.sh"
+            cmd_install_package "$package"
+            ;;
+    esac
+}
+
+show_install_help() {
+    echo ""
+    echo -e "${BOLD}${CYAN}aidevgenius install${NC}"
+    echo "Install packages with aidevgenius"
+    echo ""
+    echo -e "${BOLD}USAGE:${NC}"
+    echo "  aidevgenius install <package>"
+    echo ""
+    echo -e "${BOLD}AI TOOLS:${NC}"
+    echo "  qwen         Qwen AI Code CLI (npm + redgit + qwen-code)"
+    echo ""
+    echo -e "${BOLD}DEVELOPMENT:${NC}"
+    echo "  flutter      Flutter SDK for app development"
+    echo ""
+    echo -e "${BOLD}SHELL TOOLS:${NC}"
+    echo "  shell-tools  All shell enhancements (fish+zsh+fzf+thefuck)"
+    echo "  fish         Auto-suggestions shell"
+    echo "  zsh          Z Shell"
+    echo "  oh-my-zsh    Zsh + Powerlevel10k + all plugins"
+    echo "  thefuck      Corrects wrong commands"
+    echo ""
+    echo -e "${BOLD}EDITORS:${NC}"
+    echo "  neovim       Powerful text editor"
+    echo "  micro        Modern terminal editor"
+    echo "  nano         Simple text editor"
+    echo "  vim          Classic text editor"
+    echo ""
+    echo -e "${BOLD}EXAMPLES:${NC}"
+    echo "  aidevgenius install flutter"
+    echo "  aidevgenius install qwen"
+    echo "  aidevgenius install shell-tools"
+    echo ""
+    echo -e "${DIM}New tools auto-discovered from lib/installers/ on update${NC}"
+    echo ""
+}
+
+# Run main
+main "$@"
