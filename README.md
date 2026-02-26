@@ -43,7 +43,8 @@
 ## 📥 Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aidevgenius/aidevgenius-cli/dev/install.sh | bash
+curl -fssL https://raw.githubusercontent.com/aidevgenius/aidevgenius-cli/main/install.sh | bash
+
 ```
 
 After installation, restart your terminal or run:
